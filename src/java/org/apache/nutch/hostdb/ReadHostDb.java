@@ -50,7 +50,7 @@ import org.apache.commons.jexl2.JexlEngine;
 import org.apache.commons.jexl2.MapContext;
 
 /**
- * @see <a href='http://commons.apache.org/proper/commons-jexl/reference/syntax.html'>Commons</a>
+ * @see <a href='https://commons.apache.org/proper/commons-jexl/reference/syntax.html'>Commons</a>
  */
 public class ReadHostDb extends Configured implements Tool {
 
@@ -69,6 +69,7 @@ public class ReadHostDb extends Configured implements Tool {
     protected Text emptyText = new Text();
     protected Expression expr = null;
 
+    @Override
     public void setup(Context context) {
       dumpHomepages = context.getConfiguration().getBoolean(HOSTDB_DUMP_HOMEPAGES, false);
       dumpHostnames = context.getConfiguration().getBoolean(HOSTDB_DUMP_HOSTNAMES, false);
@@ -87,6 +88,7 @@ public class ReadHostDb extends Configured implements Tool {
       }
     }
 
+    @Override
     public void map(Text key, HostDatum datum, Context context) throws IOException, InterruptedException {
       if (fieldHeader && !dumpHomepages && !dumpHostnames) {
         context.write(new Text("hostname"), new Text("unfetched\tfetched\tgone\tredirTemp\tredirPerm\tnotModified\tnumRecords\tdnsFail\tcnxFail\tsumFail\tscore\tlastCheck\thomepage\tmetadata"));
@@ -242,6 +244,7 @@ public class ReadHostDb extends Configured implements Tool {
     System.exit(res);
   }
 
+  @Override
   public int run(String[] args) throws Exception {
     if (args.length < 2) {
       System.err.println("Usage: ReadHostDb <hostdb> [-get <url>] [<output> [-dumpHomepages | -dumpHostnames | -expr <expr.>]]");

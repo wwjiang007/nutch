@@ -51,7 +51,6 @@ import org.apache.nutch.protocol.Protocol;
 import org.apache.nutch.protocol.ProtocolFactory;
 import org.apache.nutch.protocol.ProtocolOutput;
 import org.apache.nutch.protocol.ProtocolStatus;
-import org.apache.nutch.util.NutchJob;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,7 +77,7 @@ import crawlercommons.sitemaps.SiteMapURL;
  * </ol>
  *
  * <p>For more details see:
- *      https://wiki.apache.org/nutch/SitemapFeature </p>
+ *      https://cwiki.apache.org/confluence/display/NUTCH/SitemapFeature </p>
  */
 public class SitemapProcessor extends Configured implements Tool {
   public static final Logger LOG = LoggerFactory.getLogger(SitemapProcessor.class);
@@ -106,6 +105,7 @@ public class SitemapProcessor extends Configured implements Tool {
     private CrawlDatum datum = new CrawlDatum();
     private SiteMapParser parser = null;
 
+    @Override
     public void setup(Context context) {
       Configuration conf = context.getConfiguration();
       int maxSize = conf.getInt(SITEMAP_SIZE_MAX, SiteMapParser.MAX_BYTES_ALLOWED);
@@ -127,6 +127,7 @@ public class SitemapProcessor extends Configured implements Tool {
       }
     }
 
+    @Override
     public void map(Text key, Writable value, Context context) throws IOException, InterruptedException {
       String url;
 
@@ -285,7 +286,7 @@ public class SitemapProcessor extends Configured implements Tool {
       }
       else if (asm instanceof SiteMapIndex) {
         SiteMapIndex index = (SiteMapIndex) asm;
-        Collection<AbstractSiteMap> sitemapUrls = index.getSitemaps();
+        Collection<AbstractSiteMap> sitemapUrls = index.getSitemaps(true);
 
         if (sitemapUrls.isEmpty()) {
           return;
@@ -308,11 +309,13 @@ public class SitemapProcessor extends Configured implements Tool {
 
     private boolean overwriteExisting = false; // DO NOT ENABLE!!
 
+    @Override
     public void setup(Context context) {
       Configuration conf = context.getConfiguration();
       this.overwriteExisting = conf.getBoolean(SITEMAP_OVERWRITE_EXISTING, false);
     }
 
+    @Override
     public void reduce(Text key, Iterable<CrawlDatum> values, Context context)
         throws IOException, InterruptedException {
       sitemapDatum  = null;
@@ -353,9 +356,7 @@ public class SitemapProcessor extends Configured implements Tool {
   public void sitemap(Path crawldb, Path hostdb, Path sitemapUrlDir, boolean strict, boolean filter,
                       boolean normalize, int threads) throws Exception {
     long start = System.currentTimeMillis();
-    if (LOG.isInfoEnabled()) {
-      LOG.info("SitemapProcessor: Starting at {}", sdf.format(start));
-    }
+    LOG.info("SitemapProcessor: Starting at {}", sdf.format(start));
 
     FileSystem fs = crawldb.getFileSystem(getConf());
     Path old = new Path(crawldb, "old");
@@ -461,6 +462,7 @@ public class SitemapProcessor extends Configured implements Tool {
     System.err.println("\t-noNormalize\t\tturn off URLNormalizer on urls (optional)");
   }
 
+  @Override
   public int run(String[] args) throws Exception {
     if (args.length < 3) {
       usage();

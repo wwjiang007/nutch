@@ -53,7 +53,6 @@
     <ant dir="indexer-csv" target="deploy"/>
     <ant dir="indexer-dummy" target="deploy"/>
     <ant dir="indexer-elastic" target="deploy"/>
-    <ant dir="indexer-elastic-rest" target="deploy"/>
     <ant dir="indexer-kafka" target="deploy"/>
     <ant dir="indexer-rabbit" target="deploy"/>
     <ant dir="indexer-solr" target="deploy"/>
@@ -68,6 +67,7 @@
     <ant dir="parse-swf" target="deploy"/>
     <ant dir="parse-tika" target="deploy"/>
     <ant dir="parse-zip" target="deploy"/>
+    <ant dir="parsefilter-debug" target="deploy"/>
     <ant dir="parsefilter-naivebayes" target="deploy"/>
     <ant dir="parsefilter-regex" target="deploy"/>
     <ant dir="protocol-file" target="deploy"/>
@@ -88,7 +88,7 @@
     <ant dir="tld" target="deploy"/>
     <ant dir="urlfilter-automaton" target="deploy"/>
     <ant dir="urlfilter-domain" target="deploy" />
-    <ant dir="urlfilter-domainblacklist" target="deploy" />
+    <ant dir="urlfilter-domaindenylist" target="deploy" />
     <ant dir="urlfilter-fast" target="deploy"/>
     <ant dir="urlfilter-prefix" target="deploy"/>
     <ant dir="urlfilter-regex" target="deploy"/>
@@ -145,7 +145,7 @@
      <ant dir="subcollection" target="test"/>
      <ant dir="urlfilter-automaton" target="test"/>
      <ant dir="urlfilter-domain" target="test"/>
-     <ant dir="urlfilter-domainblacklist" target="test"/>
+     <ant dir="urlfilter-domaindenylist" target="test"/>
      <ant dir="urlfilter-fast" target="test"/>
      <!--ant dir="urlfilter-ignoreexempt" target="test"/-->
      <ant dir="urlfilter-prefix" target="test"/>
@@ -192,7 +192,6 @@
     <ant dir="indexer-csv" target="clean"/>
     <ant dir="indexer-dummy" target="clean"/>
     <ant dir="indexer-elastic" target="clean"/>
-    <ant dir="indexer-elastic-rest" target="clean"/>
     <ant dir="indexer-kafka" target="clean"/>
     <ant dir="indexer-rabbit" target="clean"/>
     <ant dir="indexer-solr" target="clean"/>
@@ -214,6 +213,7 @@
     <ant dir="parse-swf" target="clean"/>
     <ant dir="parse-tika" target="clean"/>
     <ant dir="parse-zip" target="clean"/>
+    <ant dir="parsefilter-debug" target="clean" />
     <ant dir="parsefilter-naivebayes" target="clean" />
     <ant dir="parsefilter-regex" target="clean"/>
     <ant dir="protocol-file" target="clean"/>
@@ -234,7 +234,7 @@
     <ant dir="tld" target="clean"/>
     <ant dir="urlfilter-automaton" target="clean"/>
     <ant dir="urlfilter-domain" target="clean" />
-    <ant dir="urlfilter-domainblacklist" target="clean" />
+    <ant dir="urlfilter-domaindenylist" target="clean" />
     <ant dir="urlfilter-fast" target="clean"/>
     <ant dir="urlfilter-ignoreexempt" target="clean"/>
     <ant dir="urlfilter-prefix" target="clean"/>

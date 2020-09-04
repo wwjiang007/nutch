@@ -85,8 +85,10 @@ public class FetcherThread extends Thread {
   private URLNormalizers normalizers;
   private ProtocolFactory protocolFactory;
   private long maxCrawlDelay;
+  private long minCrawlDelay;
   private String queueMode;
   private int maxRedirect;
+  private boolean maxRedirectExceededSkip = false;
   private String reprUrl;
   private boolean redirecting;
   private int redirectCount;
@@ -112,11 +114,11 @@ public class FetcherThread extends Thread {
 
   private AtomicInteger activeThreads;
 
-  private Object fetchQueues;
+  private FetchItemQueues fetchQueues;
 
   private QueueFeeder feeder;
 
-  private Object spinWaiting;
+  private AtomicInteger spinWaiting;
 
   private AtomicLong lastRequestStart;
 
@@ -164,6 +166,9 @@ public class FetcherThread extends Thread {
     this.protocolFactory = new ProtocolFactory(conf);
     this.normalizers = new URLNormalizers(conf, URLNormalizers.SCOPE_FETCHER);
     this.maxCrawlDelay = conf.getInt("fetcher.max.crawl.delay", 30) * 1000;
+    float crawlDelay = conf.getFloat("fetcher.server.delay", 1.0f);
+    this.minCrawlDelay = (long) (conf.getFloat("fetcher.min.crawl.delay",
+        crawlDelay) * 1000);
     this.activeThreads = activeThreads;
     this.fetchQueues = fetchQueues;
     this.feeder = feeder;
@@ -197,7 +202,10 @@ public class FetcherThread extends Thread {
     queueMode = FetchItemQueues.checkQueueMode(queueMode);
     LOG.info("{} {} Using queue mode : {}", getName(),
         Thread.currentThread().getId(), queueMode);
+
     this.maxRedirect = conf.getInt("http.redirect.max", 3);
+    this.maxRedirectExceededSkip = conf
+        .getBoolean("http.redirect.max.exceeded.skip", false);
 
     int maxOutlinksPerPage = conf.getInt("db.max.outlinks.per.page", 100);
     maxOutlinks = (maxOutlinksPerPage < 0) ? Integer.MAX_VALUE
@@ -249,17 +257,17 @@ public class FetcherThread extends Thread {
           return;
         }
 
-        fit = ((FetchItemQueues) fetchQueues).getFetchItem();
+        fit = fetchQueues.getFetchItem();
         if (fit == null) {
-          if (feeder.isAlive() || ((FetchItemQueues) fetchQueues).getTotalSize() > 0) {
+          if (feeder.isAlive() || fetchQueues.getTotalSize() > 0) {
             LOG.debug("{} spin-waiting ...", getName());
             // spin-wait.
-            ((AtomicInteger) spinWaiting).incrementAndGet();
+            spinWaiting.incrementAndGet();
             try {
               Thread.sleep(500);
             } catch (Exception e) {
             }
-            ((AtomicInteger) spinWaiting).decrementAndGet();
+            spinWaiting.decrementAndGet();
             continue;
           } else {
             // all done, finish this thread
@@ -293,12 +301,9 @@ public class FetcherThread extends Thread {
             if (LOG.isInfoEnabled()) {
               LOG.info("{} {} fetching {} (queue crawl delay={}ms)", getName(),
                   Thread.currentThread().getId(), fit.url,
-                  ((FetchItemQueues) fetchQueues)
-                      .getFetchItemQueue(fit.queueID).crawlDelay);
+                  fetchQueues.getFetchItemQueue(fit.queueID).crawlDelay);
             }
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("redirectCount={}", redirectCount);
-            }
+            LOG.debug("redirectCount={}", redirectCount);
             redirecting = false;
             Protocol protocol = this.protocolFactory.getProtocol(fit.u);
             BaseRobotRules rules = protocol.getRobotRules(fit.url, fit.datum,
@@ -309,7 +314,7 @@ public class FetcherThread extends Thread {
             }
             if (!rules.isAllowed(fit.url.toString())) {
               // unblock
-              ((FetchItemQueues) fetchQueues).finishFetchItem(fit, true);
+              fetchQueues.finishFetchItem(fit, true);
               LOG.info("Denied by robots.txt: {}", fit.url);
               output(fit.url, fit.datum, null,
                   ProtocolStatus.STATUS_ROBOTS_DENIED,
@@ -320,9 +325,9 @@ public class FetcherThread extends Thread {
             if (rules.getCrawlDelay() > 0) {
               if (rules.getCrawlDelay() > maxCrawlDelay && maxCrawlDelay >= 0) {
                 // unblock
-                ((FetchItemQueues) fetchQueues).finishFetchItem(fit, true);
-                LOG.info("Crawl-Delay for {} too long ({}), skipping", fit.url,
-                    rules.getCrawlDelay());
+                fetchQueues.finishFetchItem(fit, true);
+                LOG.info("Crawl-Delay for {} too long ({} ms), skipping",
+                    fit.url, rules.getCrawlDelay());
                 output(fit.url, fit.datum, null,
                     ProtocolStatus.STATUS_ROBOTS_DENIED,
                     CrawlDatum.STATUS_FETCH_GONE);
@@ -330,14 +335,18 @@ public class FetcherThread extends Thread {
                     "robots_denied_maxcrawldelay").increment(1);
                 continue;
               } else {
-                FetchItemQueue fiq = ((FetchItemQueues) fetchQueues)
-                    .getFetchItemQueue(fit.queueID);
-                fiq.crawlDelay = rules.getCrawlDelay();
-                if (LOG.isDebugEnabled()) {
-                  LOG.debug("Crawl delay for queue: " + fit.queueID
-                      + " is set to " + fiq.crawlDelay
-                      + " as per robots.txt. url: " + fit.url);
+                FetchItemQueue fiq = fetchQueues.getFetchItemQueue(fit.queueID);
+                long crawlDelay = rules.getCrawlDelay();
+                if (crawlDelay < minCrawlDelay) {
+                  LOG.info(
+                      "Crawl-Delay for {} too short ({} ms), adjusting to {} ms",
+                      fit.url, rules.getCrawlDelay(), minCrawlDelay);
+                  crawlDelay = minCrawlDelay;
                 }
+                fiq.crawlDelay = crawlDelay;
+                LOG.debug(
+                    "Crawl delay for queue: {} is set to {} as per robots.txt. url: ",
+                    fit.queueID, fiq.crawlDelay, fit.url);
               }
             }
             ProtocolOutput output = protocol.getProtocolOutput(fit.url,
@@ -346,7 +355,7 @@ public class FetcherThread extends Thread {
             Content content = output.getContent();
             ParseStatus pstatus = null;
             // unblock queue
-            ((FetchItemQueues) fetchQueues).finishFetchItem(fit);
+            fetchQueues.finishFetchItem(fit);
 
             // used for FetchNode
             if (fetchNode != null) {
@@ -367,7 +376,7 @@ public class FetcherThread extends Thread {
 
             case ProtocolStatus.WOULDBLOCK:
               // retry ?
-              ((FetchItemQueues) fetchQueues).addFetchItem(fit);
+              fetchQueues.addFetchItem(fit);
               break;
 
             case ProtocolStatus.SUCCESS: // got a page
@@ -412,8 +421,8 @@ public class FetcherThread extends Thread {
 
             case ProtocolStatus.EXCEPTION:
               logError(fit.url, status.getMessage());
-              int killedURLs = ((FetchItemQueues) fetchQueues).checkExceptionThreshold(fit
-                  .getQueueID());
+              int killedURLs = fetchQueues
+                  .checkExceptionThreshold(fit.getQueueID());
               if (killedURLs != 0)
                 context.getCounter("FetcherStatus",
                     "AboveExceptionThresholdInQueue").increment(killedURLs);
@@ -447,21 +456,29 @@ public class FetcherThread extends Thread {
             }
 
             if (redirecting && redirectCount > maxRedirect) {
-              ((FetchItemQueues) fetchQueues).finishFetchItem(fit);
+              fetchQueues.finishFetchItem(fit);
+              context.getCounter("FetcherStatus", "redirect_count_exceeded")
+                  .increment(1);
               if (LOG.isInfoEnabled()) {
-                LOG.info("{} {} - redirect count exceeded {}", getName(),
-                    Thread.currentThread().getId(), fit.url);
+                LOG.info("{} {} - redirect count exceeded {} ({})", getName(),
+                    Thread.currentThread().getId(), fit.url,
+                    maxRedirectExceededSkip ? "skipped" : "linked");
               }
-              output(fit.url, fit.datum, null,
-                  ProtocolStatus.STATUS_REDIR_EXCEEDED,
-                  CrawlDatum.STATUS_FETCH_GONE);
+              if (maxRedirectExceededSkip) {
+                // skip redirect target when redirect count is exceeded
+              } else {
+                Text newUrl = new Text(status.getMessage());
+                CrawlDatum newDatum = createRedirDatum(newUrl, fit,
+                    CrawlDatum.STATUS_LINKED);
+                output(newUrl, newDatum, null, null, CrawlDatum.STATUS_LINKED);
+              }
             }
 
           } while (redirecting && (redirectCount <= maxRedirect));
 
         } catch (Throwable t) { // unexpected exception
           // unblock
-          ((FetchItemQueues) fetchQueues).finishFetchItem(fit);
+          fetchQueues.finishFetchItem(fit);
           String message;
           if (LOG.isDebugEnabled()) {
             message = StringUtils.stringifyException(t);
@@ -481,8 +498,9 @@ public class FetcherThread extends Thread {
         LOG.error("fetcher caught:", e);
       }
     } finally {
-      if (fit != null)
-        ((FetchItemQueues) fetchQueues).finishFetchItem(fit);
+      if (fit != null) {
+        fetchQueues.finishFetchItem(fit);
+      }
       activeThreads.decrementAndGet(); // count threads
       LOG.info("{} {} -finishing thread {}, activeThreads={}", getName(),
           Thread.currentThread().getId(), getName(), activeThreads);
@@ -550,39 +568,43 @@ public class FetcherThread extends Thread {
       LOG.debug(" - {} redirect to {} (fetching now)", redirType, url);
       return url;
     } else {
-      CrawlDatum newDatum = new CrawlDatum(CrawlDatum.STATUS_LINKED,
-          fit.datum.getFetchInterval(), fit.datum.getScore());
-      // transfer existing metadata
-      newDatum.getMetaData().putAll(fit.datum.getMetaData());
-      try {
-        scfilters.initialScore(url, newDatum);
-      } catch (ScoringFilterException e) {
-        e.printStackTrace();
-      }
-      if (reprUrl != null) {
-        newDatum.getMetaData().put(Nutch.WRITABLE_REPR_URL_KEY,
-            new Text(reprUrl));
-      }
+      CrawlDatum newDatum = createRedirDatum(url, fit, CrawlDatum.STATUS_LINKED);
       output(url, newDatum, null, null, CrawlDatum.STATUS_LINKED);
       LOG.debug(" - {} redirect to {} (fetching later)", redirType, url);
       return null;
     }
   }
 
-  private FetchItem queueRedirect(Text redirUrl, FetchItem fit)
-      throws ScoringFilterException {
-    CrawlDatum newDatum = new CrawlDatum(CrawlDatum.STATUS_DB_UNFETCHED,
-        fit.datum.getFetchInterval(), fit.datum.getScore());
-    // transfer all existing metadata to the redirect
+  private CrawlDatum createRedirDatum(Text redirUrl, FetchItem fit, byte status) {
+    CrawlDatum newDatum = new CrawlDatum(status, fit.datum.getFetchInterval(),
+        fit.datum.getScore());
+    // transfer existing metadata
     newDatum.getMetaData().putAll(fit.datum.getMetaData());
-    scfilters.initialScore(redirUrl, newDatum);
+    try {
+      scfilters.initialScore(redirUrl, newDatum);
+    } catch (ScoringFilterException e) {
+      LOG.error("Scoring filtering failed for {}: ", redirUrl, e);
+    }
     if (reprUrl != null) {
       newDatum.getMetaData().put(Nutch.WRITABLE_REPR_URL_KEY,
           new Text(reprUrl));
     }
+    return newDatum;
+  }
+
+  private FetchItem queueRedirect(Text redirUrl, FetchItem fit)
+      throws ScoringFilterException {
+    if (fetchQueues.redirectIsQueuedRecently(redirUrl)) {
+      redirecting = false;
+      context.getCounter("FetcherStatus", "redirect_deduplicated").increment(1);
+      LOG.debug(" - ignoring redirect from {} to {} as duplicate", fit.url,
+          redirUrl);
+      return null;
+    }
+    CrawlDatum newDatum = createRedirDatum(redirUrl, fit, CrawlDatum.STATUS_DB_UNFETCHED);
     fit = FetchItem.create(redirUrl, newDatum, queueMode);
     if (fit != null) {
-      FetchItemQueue fiq = ((FetchItemQueues) fetchQueues).getFetchItemQueue(fit.queueID);
+      FetchItemQueue fiq = fetchQueues.getFetchItemQueue(fit.queueID);
       fiq.addInProgressFetchItem(fit);
     } else {
       // stop redirecting
@@ -761,7 +783,7 @@ public class FetcherThread extends Thread {
           // Only process depth N outlinks
           if (maxOutlinkDepth > 0 && outlinkDepth < maxOutlinkDepth) {
             FetchItem ft = FetchItem.create(url, null, queueMode);
-            FetchItemQueue queue = ((FetchItemQueues) fetchQueues).getFetchItemQueue(ft.queueID);
+            FetchItemQueue queue = fetchQueues.getFetchItemQueue(ft.queueID);
             queue.alreadyFetched.add(url.toString().hashCode());
 
             context.getCounter("FetcherOutlinks", "outlinks_detected").increment(
@@ -799,7 +821,7 @@ public class FetcherThread extends Thread {
               
               context.getCounter("FetcherOutlinks", "outlinks_following").increment(1);    
               
-              ((FetchItemQueues) fetchQueues).addFetchItem(fit);
+              fetchQueues.addFetchItem(fit);
 
               outlinkCounter++;
             }

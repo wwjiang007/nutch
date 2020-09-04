@@ -578,6 +578,7 @@ public class Generator extends NutchTool implements Tool {
   public static class SelectorInverseMapper
       extends Mapper<FloatWritable, SelectorEntry, Text, SelectorEntry> {
 
+    @Override
     public void map(FloatWritable key, SelectorEntry value, Context context)
         throws IOException, InterruptedException {
       SelectorEntry entry = value;
@@ -588,6 +589,7 @@ public class Generator extends NutchTool implements Tool {
   public static class PartitionReducer
       extends Reducer<Text, SelectorEntry, Text, CrawlDatum> {
 
+    @Override
     public void reduce(Text key, Iterable<SelectorEntry> values,
         Context context) throws IOException, InterruptedException {
       // if using HashComparator, we get only one input key in case of
@@ -606,6 +608,7 @@ public class Generator extends NutchTool implements Tool {
     }
 
     @SuppressWarnings("rawtypes")
+    @Override
     public int compare(WritableComparable a, WritableComparable b) {
       Text url1 = (Text) a;
       Text url2 = (Text) b;
@@ -614,6 +617,7 @@ public class Generator extends NutchTool implements Tool {
       return (hash1 < hash2 ? -1 : (hash1 == hash2 ? 0 : 1));
     }
 
+    @Override
     public int compare(byte[] b1, int s1, int l1, byte[] b2, int s2, int l2) {
       int hash1 = hash(b1, s1, l1);
       int hash2 = hash(b2, s2, l2);
@@ -837,6 +841,14 @@ public class Generator extends NutchTool implements Tool {
           String.format(Locale.ROOT, "%6d", counter.getValue()),
           counter.getName());
     }
+    if (!getConf().getBoolean(GENERATE_UPDATE_CRAWLDB, false)) {
+      /*
+       * generated items are not marked in CrawlDb, and CrawlDb will not
+       * accessed anymore: we already can release the lock
+       */
+      LockUtil.removeLockFile(getConf(), lock);
+      lock = null;
+    }
 
     // read the subdirectories generated in the temp
     // output and turn them into segments
@@ -854,15 +866,13 @@ public class Generator extends NutchTool implements Tool {
       }
     } catch (Exception e) {
       LOG.warn("Generator: exception while partitioning segments, exiting ...");
-      LockUtil.removeLockFile(getConf(), lock);
-      fs.delete(tempDir, true);
+      NutchJob.cleanupAfterFailure(tempDir, lock, fs);
       return null;
     }
 
     if (generatedSegments.size() == 0) {
       LOG.warn("Generator: 0 records selected for fetching, exiting ...");
-      LockUtil.removeLockFile(getConf(), lock);
-      fs.delete(tempDir, true);
+      NutchJob.cleanupAfterFailure(tempDir, lock, fs);
       return null;
     }
 
@@ -909,7 +919,9 @@ public class Generator extends NutchTool implements Tool {
       fs.delete(tempDir2, true);
     }
 
-    LockUtil.removeLockFile(getConf(), lock);
+    if (lock != null) {
+      LockUtil.removeLockFile(getConf(), lock);
+    }
     fs.delete(tempDir, true);
 
     long end = System.currentTimeMillis();
@@ -923,9 +935,8 @@ public class Generator extends NutchTool implements Tool {
   private Path partitionSegment(Path segmentsDir, Path inputDir, int numLists)
       throws IOException, ClassNotFoundException, InterruptedException {
     // invert again, partition by host/domain/IP, sort by url hash
-    if (LOG.isInfoEnabled()) {
-      LOG.info("Generator: Partitioning selected urls for politeness.");
-    }
+    LOG.info("Generator: Partitioning selected urls for politeness.");
+
     Path segment = new Path(segmentsDir, generateSegmentName());
     Path output = new Path(segment, CrawlDatum.GENERATE_DIR_NAME);
 
@@ -989,6 +1000,7 @@ public class Generator extends NutchTool implements Tool {
     System.exit(res);
   }
 
+  @Override
   public int run(String[] args) throws Exception {
     if (args.length < 2) {
       System.out.println(
